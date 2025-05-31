@@ -26,7 +26,7 @@ The Pentest Scheduler helps security teams prioritize which applications need pe
 1. Clone or download this repository:
 ```bash
 cd ~/dev
-git clone <pentest-scheduler-repo-url>
+git clone https://github.com/Arnauec/git-repo-downloader
 cd pentest-scheduler
 ```
 
