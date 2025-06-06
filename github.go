@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/go-github/v66/github"
 	"golang.org/x/oauth2"
+	"gopkg.in/yaml.v3"
 )
 
 func downloadGitHubRepos(config Config) error {
@@ -50,11 +52,32 @@ func downloadGitHubRepos(config Config) error {
 		opt.Page = resp.NextPage
 	}
 
-	fmt.Printf("Found %d repositories\n\n", len(allRepos))
+	fmt.Printf("Found %d repositories\n", len(allRepos))
+
+	// If production mode is enabled, filter repositories
+	var reposToDownload []*github.Repository
+	if config.ProdMode {
+		fmt.Printf("🔍 Production mode enabled: Checking .catalog.yml files for lifecycle: production\n")
+		reposToDownload = filterProductionRepos(ctx, client, allRepos, config.Organization)
+		fmt.Printf("📋 Found %d repositories with lifecycle: production\n", len(reposToDownload))
+	} else {
+		reposToDownload = allRepos
+	}
+
+	if len(reposToDownload) == 0 {
+		if config.ProdMode {
+			fmt.Printf("⚠️  No repositories found with component.lifecycle: production\n")
+		} else {
+			fmt.Printf("⚠️  No repositories to download\n")
+		}
+		return nil
+	}
+
+	fmt.Printf("\n")
 
 	// Download each repository
-	for i, repo := range allRepos {
-		fmt.Printf("[%d/%d] Processing: %s\n", i+1, len(allRepos), repo.GetName())
+	for i, repo := range reposToDownload {
+		fmt.Printf("[%d/%d] Processing: %s\n", i+1, len(reposToDownload), repo.GetName())
 		
 		if err := cloneRepository(repo.GetName(), getGitHubCloneURL(repo, config.UseSSH), config.TargetDir); err != nil {
 			log.Printf("Warning: Failed to clone %s: %v", repo.GetName(), err)
@@ -65,6 +88,61 @@ func downloadGitHubRepos(config Config) error {
 	}
 
 	return nil
+}
+
+// filterProductionRepos checks each repository for .catalog.yml with lifecycle: production
+func filterProductionRepos(ctx context.Context, client *github.Client, repos []*github.Repository, org string) []*github.Repository {
+	var productionRepos []*github.Repository
+
+	for i, repo := range repos {
+		fmt.Printf("[%d/%d] Checking %s for .catalog.yml...", i+1, len(repos), repo.GetName())
+		
+		isProduction, err := checkGitHubCatalogFile(ctx, client, org, repo.GetName())
+		if err != nil {
+			fmt.Printf(" ❌ Error: %v\n", err)
+			continue
+		}
+
+		if isProduction {
+			fmt.Printf(" ✅ Production lifecycle found\n")
+			productionRepos = append(productionRepos, repo)
+		} else {
+			fmt.Printf(" ⏭️  Not production or no .catalog.yml\n")
+		}
+	}
+
+	return productionRepos
+}
+
+// checkGitHubCatalogFile fetches and parses .catalog.yml to check for lifecycle: production
+func checkGitHubCatalogFile(ctx context.Context, client *github.Client, owner, repo string) (bool, error) {
+	// Try to get .catalog.yml file from the repository
+	fileContent, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, ".catalog.yml", nil)
+	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			return false, nil // File not found, not an error
+		}
+		return false, fmt.Errorf("failed to fetch .catalog.yml: %w", err)
+	}
+
+	if fileContent == nil {
+		return false, nil // File not found
+	}
+
+	// Decode base64 content
+	content, err := base64.StdEncoding.DecodeString(*fileContent.Content)
+	if err != nil {
+		return false, fmt.Errorf("failed to decode file content: %w", err)
+	}
+
+	// Parse YAML
+	var catalog CatalogYAML
+	if err := yaml.Unmarshal(content, &catalog); err != nil {
+		return false, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	// Check if lifecycle is production
+	return catalog.Component.Lifecycle == "production", nil
 }
 
 func getGitHubCloneURL(repo *github.Repository, useSSH bool) string {

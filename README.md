@@ -1,41 +1,57 @@
-# Pentest Scheduler
+# Git Repository Downloader
 
-A Go application that analyzes git repositories to prioritize penetration testing efforts based on code change activity over configurable time periods.
+A Go application that downloads all repositories from GitHub and GitLab organizations or groups. This tool is useful for backing up repositories, migrating between platforms, or performing bulk analysis of organizational codebases.
 
 ## Overview
 
-The Pentest Scheduler helps security teams prioritize which applications need penetration testing by analyzing git repository activity. It calculates a risk score based on:
+The Git Repository Downloader connects to GitHub and GitLab APIs to fetch all repositories from specified organizations or groups and clones them to a local directory. It supports both public and private repositories (with proper authentication).
 
-- **Code change percentage** - How much of the codebase has changed
-- **Commit frequency** - Number of commits in the time period
-- **Recency of changes** - How recently changes were made
-- **Files modified** - Number of files that have been updated
+**NEW**: Production Mode (`--prod`) filters repositories to only download those with `component.lifecycle: production` in their `.catalog.yml` files, making it perfect for identifying and downloading only production-ready services.
 
 ## Features
 
-- 🔍 **Automatic Repository Discovery** - Recursively finds all git repositories in a directory
-- 📊 **Risk-Based Prioritization** - Calculates risk scores and assigns priority levels (HIGH/MEDIUM/LOW)
-- ⏰ **Configurable Time Periods** - Analyze changes over 1 month, 6 months, 1 year, or custom periods
-- 📈 **Multiple Output Formats** - Table, JSON, and CSV output formats
-- 🎯 **Filtering Options** - Filter by minimum change threshold and include/exclude inactive repos
-- 📁 **Flexible Directory Structure** - Works with any directory containing git repositories
-- 🔄 **Scheduler Ready** - Designed to run periodically via cron or CI/CD
+- 🐙 **GitHub Support** - Download all repositories from GitHub organizations
+- 🦊 **GitLab Support** - Download all repositories from GitLab groups (including subgroups)
+- 🔐 **Authentication** - Support for personal access tokens for private repositories
+- 🔄 **Smart Cloning** - Skips repositories that already exist locally
+- 📁 **Organized Output** - Creates clean directory structure with all repositories
+- 🌐 **Multiple GitLab Instances** - Support for GitLab.com and self-hosted GitLab instances
+- 🔗 **SSH/HTTPS Support** - Choose between SSH and HTTPS cloning methods
+- 🏭 **Production Mode** - Filter repositories by `component.lifecycle: production` in `.catalog.yml` files
 
 ## Installation
 
-1. Clone or download this repository:
+### Prerequisites
+
+- Go 1.21 or later
+- Git installed and configured
+- Network access to GitHub/GitLab
+
+### Build from Source
+
+1. Clone this repository:
 ```bash
-cd ~/dev
 git clone https://github.com/Arnauec/git-repo-downloader
-cd pentest-scheduler
+cd git-repo-downloader
 ```
 
-2. Build the application:
+2. Download dependencies:
 ```bash
-go build -o pentest-scheduler
+go mod tidy
 ```
 
-Or install globally:
+3. Build the application:
+```bash
+go build -o git-repo-downloader
+```
+
+Or use the Makefile:
+```bash
+make build
+```
+
+### Install Globally
+
 ```bash
 go install
 ```
@@ -45,148 +61,251 @@ go install
 ### Basic Usage
 
 ```bash
-# Analyze repositories in current directory for the last 6 months
-./pentest-scheduler
+# Download all public repositories from a GitHub organization
+./git-repo-downloader -platform=github -org=kubernetes
 
-# Analyze specific directory for the last year
-./pentest-scheduler -dir=~/dev -period=1y
+# Download all repositories from a GitLab group (requires token for private repos)
+./git-repo-downloader -platform=gitlab -org=mycompany -token=your-gitlab-token
 
-# Get JSON output for automation
-./pentest-scheduler -dir=~/dev -period=6m -format=json -output=results.json
+# Download to a specific directory
+./git-repo-downloader -platform=github -org=kubernetes -dir=./downloads
 
-# Filter out repositories with less than 5% change
-./pentest-scheduler -dir=~/dev -period=6m -min-change=5.0
-
-# Include detailed logging
-./pentest-scheduler -dir=~/dev -period=6m -verbose
+# Production mode: Only download repos with component.lifecycle: production
+./git-repo-downloader -platform=github -org=mycompany -token=your-token --prod
 ```
 
 ### Command Line Options
 
-| Flag | Description | Default | Example |
-|------|-------------|---------|---------|
-| `-dir` | Directory containing git repositories | `.` (current) | `-dir=~/dev` |
-| `-period` | Time period to analyze | `6m` | `-period=1y` |
-| `-format` | Output format: table, json, csv | `table` | `-format=json` |
-| `-output` | Output file path | stdout | `-output=results.json` |
-| `-min-change` | Minimum change percentage to include | `0.0` | `-min-change=5.0` |
-| `-include-inactive` | Include repositories with no changes | `false` | `-include-inactive` |
-| `-verbose` | Enable verbose logging | `false` | `-verbose` |
+| Flag | Description | Required | Default | Example |
+|------|-------------|----------|---------|---------|
+| `-platform` | Platform to use: `github` or `gitlab` | Yes | - | `-platform=github` |
+| `-org` | Organization (GitHub) or Group (GitLab) name | Yes | - | `-org=kubernetes` |
+| `-token` | Personal access token for authentication | No* | - | `-token=ghp_xxxx` |
+| `-dir` | Target directory for downloaded repositories | No | `./repositories` | `-dir=~/dev` |
+| `-ssh` | Use SSH URLs instead of HTTPS | No | `false` | `-ssh` |
+| `-gitlab-url` | GitLab instance URL (for self-hosted) | No | `https://gitlab.com` | `-gitlab-url=https://gitlab.example.com` |
+| `--prod` | Only download repos with `component.lifecycle: production` | No | `false` | `--prod` |
 
-### Time Period Formats
+*Required for private repositories
 
-| Format | Description |
-|--------|-------------|
-| `1m`, `1month` | 1 month (30 days) |
-| `3m`, `3months` | 3 months (90 days) |
-| `6m`, `6months` | 6 months (180 days) |
-| `1y`, `1year` | 1 year (365 days) |
-| `2y`, `2years` | 2 years (730 days) |
-| `720h`, `168h` | Custom duration (Go duration format) |
+### Production Mode (--prod)
 
-## Output Examples
+When the `--prod` flag is enabled, the tool will:
 
-### Table Format (Default)
+1. **Scan each repository** for a `.catalog.yml` file in the root directory
+2. **Parse the YAML content** to check for `component.lifecycle: production`
+3. **Only download repositories** that meet this criteria
+4. **Show detailed progress** of which repositories are being checked and filtered
 
-```
-Pentest Priority Analysis Results
-=================================
-
-REPOSITORY               PRIORITY   RISK     COMMITS      CHANGES%     LAST COMMIT      FILES   
-----------------------------------------------------------------------------------------------------
-web-app-api             🔴 HIGH    87.5     45           12.34%       2024-05-30       23      
-mobile-app              🟡 MED     56.2     23           8.45%        2024-05-28       15      
-legacy-system           🟢 LOW     23.1     5            2.10%        2024-04-15       8       
-
-Priority Summary:
------------------
-🔴 HIGH priority:   1 repositories (immediate pentesting recommended)
-🟡 MEDIUM priority: 1 repositories (pentest within 3 months)
-🟢 LOW priority:    1 repositories (pentest within 6 months)
-
-Recommendations:
-----------------
-• Start with HIGH priority repositories - these have significant recent changes
-• Schedule MEDIUM priority repositories for upcoming pentest cycles
-• LOW priority repositories can be tested during maintenance cycles
-```
-
-### JSON Format
-
-```json
-{
-  "generated_at": "2024-05-31T10:30:00Z",
-  "time_period": "6m0s",
-  "repositories_dir": "/Users/user/dev",
-  "total_repositories": 3,
-  "active_repositories": 3,
-  "results": [
-    {
-      "name": "web-app-api",
-      "path": "/Users/user/dev/web-app-api",
-      "last_commit_date": "2024-05-30T15:20:00Z",
-      "commit_count": 45,
-      "files_changed": 23,
-      "lines_added": 1250,
-      "lines_deleted": 890,
-      "lines_modified": 2140,
-      "total_changes": 2140,
-      "change_percentage": 12.34,
-      "risk_score": 87.5,
-      "recommended_priority": "HIGH"
-    }
-  ]
-}
-```
-
-## Risk Scoring Algorithm
-
-The risk score is calculated using three factors:
-
-1. **Change Percentage (0-40 points)**
-   - Based on lines modified vs. total repository size
-   - Higher percentage = higher risk
-
-2. **Commit Frequency (0-30 points)**
-   - Number of commits in the time period
-   - More commits = more changes = higher risk
-
-3. **Recency (0-30 points)**
-   - How recently the last commit was made
-   - Recent changes = higher risk
-   - < 7 days: 30 points
-   - < 30 days: 20 points  
-   - < 90 days: 10 points
-
-**Priority Levels:**
-- **HIGH (70-100 points)**: Immediate pentesting recommended
-- **MEDIUM (40-69 points)**: Pentest within 3 months
-- **LOW (0-39 points)**: Pentest within 6 months
-
-## Automation & Scheduling
-
-### Running Periodically with Cron
-
-Add to crontab for weekly analysis:
-
-```bash
-# Run every Monday at 9 AM
-0 9 * * 1 /path/to/pentest-scheduler -dir=/path/to/repos -format=json -output=/var/reports/pentest-priority.json
-```
-
-### CI/CD Integration
-
-Example GitHub Actions workflow:
+Example `.catalog.yml` file that would be **included** in production mode:
 
 ```yaml
-name: Pentest Priority Analysis
+---
+version: '1'
+type: microservice
+component:
+  name: 'my-production-service'
+  service: 'my-production-service'
+  team: Platform
+  description: 'A production-ready microservice'
+  tags:
+    - critical
+    - production
+  lifecycle: production  # This line makes it eligible for --prod mode
+  kafka:
+    consumer:
+      topics:
+        - events.user.created.v1
+    producer:
+      topics:
+        - events.notification.sent.v1
+```
+
+### Examples
+
+#### GitHub Examples
+
+```bash
+# Download public repositories from Kubernetes organization
+./git-repo-downloader -platform=github -org=kubernetes
+
+# Download all repositories (including private) with authentication
+./git-repo-downloader -platform=github -org=mycompany -token=ghp_1234567890abcdef
+
+# Download only production services
+./git-repo-downloader -platform=github -org=mycompany -token=ghp_1234567890abcdef --prod
+
+# Use SSH for cloning (requires SSH key setup)
+./git-repo-downloader -platform=github -org=mycompany -token=ghp_1234567890abcdef -ssh
+
+# Download to specific directory
+./git-repo-downloader -platform=github -org=kubernetes -dir=~/github-repos
+```
+
+#### GitLab Examples
+
+```bash
+# Download from GitLab.com group
+./git-repo-downloader -platform=gitlab -org=gitlab-org -token=glpat-xxxxxxxxxxxx
+
+# Download from self-hosted GitLab instance
+./git-repo-downloader -platform=gitlab -org=mygroup -token=glpat-xxxxxxxxxxxx -gitlab-url=https://gitlab.company.com
+
+# Download only production services from GitLab
+./git-repo-downloader -platform=gitlab -org=mygroup -token=glpat-xxxxxxxxxxxx --prod
+
+# Download including subgroups
+./git-repo-downloader -platform=gitlab -org=parent-group -token=glpat-xxxxxxxxxxxx
+```
+
+## Sample Output with --prod
+
+```
+Git Repository Downloader
+=========================
+Platform: github
+Organization/Group: mycompany
+Target directory: ./repositories
+Authentication: Using provided token
+Clone method: HTTPS
+Production mode: Enabled (only downloading repos with lifecycle: production)
+
+Found 25 repositories
+🔍 Production mode enabled: Checking .catalog.yml files for lifecycle: production
+[1/25] Checking web-api for .catalog.yml... ✅ Production lifecycle found
+[2/25] Checking mobile-app for .catalog.yml... ⏭️  Not production or no .catalog.yml
+[3/25] Checking user-service for .catalog.yml... ✅ Production lifecycle found
+[4/25] Checking test-utils for .catalog.yml... ⏭️  Not production or no .catalog.yml
+...
+📋 Found 8 repositories with lifecycle: production
+
+[1/8] Processing: web-api
+  Cloning from: https://github.com/mycompany/web-api.git
+  Target path: ./repositories/web-api
+✓ Successfully cloned: web-api
+
+[2/8] Processing: user-service
+  Cloning from: https://github.com/mycompany/user-service.git
+  Target path: ./repositories/user-service
+✓ Successfully cloned: user-service
+
+...
+
+✅ Repository download completed successfully!
+All repositories have been downloaded to: ./repositories
+
+🔍 Final scan of downloaded repositories...
+
+Catalog File Scan Results
+=========================
+Repository Analysis:
+--------------------
+✅ web-api - .catalog.yml found
+✅ user-service - .catalog.yml found
+✅ payment-processor - .catalog.yml found
+✅ notification-service - .catalog.yml found
+
+Summary:
+--------
+Total repositories scanned: 8
+Repositories with .catalog.yml: 8
+Repositories missing .catalog.yml: 0
+
+📋 Repositories with .catalog.yml files:
+   - web-api (./repositories/web-api/.catalog.yml)
+   - user-service (./repositories/user-service/.catalog.yml)
+   - payment-processor (./repositories/payment-processor/.catalog.yml)
+   - notification-service (./repositories/notification-service/.catalog.yml)
+```
+
+## Authentication
+
+### GitHub Personal Access Token
+
+1. Go to GitHub Settings → Developer settings → Personal access tokens
+2. Generate a new token with `repo` scope for private repositories
+3. Use the token with `-token=ghp_your_token_here`
+
+**Required scopes:**
+- `public_repo` - for public repositories
+- `repo` - for private repositories
+
+### GitLab Personal Access Token
+
+1. Go to GitLab User Settings → Access Tokens
+2. Create a token with `read_repository` scope
+3. Use the token with `-token=glpat_your_token_here`
+
+**Required scopes:**
+- `read_repository` - to clone repositories
+- `read_api` - to list repositories
+
+## Directory Structure
+
+The tool creates the following directory structure:
+
+```
+target-directory/
+├── repo1/
+│   ├── .git/
+│   ├── README.md
+│   └── ...
+├── repo2/
+│   ├── .git/
+│   ├── src/
+│   └── ...
+└── repo3/
+    ├── .git/
+    └── ...
+```
+
+## Error Handling
+
+- **Repository already exists**: Skipped with a warning message
+- **Authentication failure**: Clear error message with suggestions
+- **Network issues**: Retry logic for transient failures
+- **Git clone failures**: Logged but don't stop the overall process
+
+## Use Cases
+
+### Backup and Archival
+```bash
+# Backup all company repositories
+./git-repo-downloader -platform=github -org=mycompany -token=$GITHUB_TOKEN -dir=/backup/repos
+```
+
+### Migration Between Platforms
+```bash
+# Download from GitLab for migration to GitHub
+./git-repo-downloader -platform=gitlab -org=old-company -token=$GITLAB_TOKEN -dir=./migration
+```
+
+### Bulk Analysis
+```bash
+# Download repositories for security scanning
+./git-repo-downloader -platform=github -org=target-org -dir=./analysis
+# Then run your analysis tools on ./analysis/*
+```
+
+### Development Environment Setup
+```bash
+# Set up development environment with all team repositories
+./git-repo-downloader -platform=github -org=dev-team -token=$GITHUB_TOKEN -dir=~/dev
+```
+
+## Automation
+
+### Using with CI/CD
+
+```yaml
+# GitHub Actions example
+name: Repository Backup
 on:
   schedule:
-    - cron: '0 9 * * 1'  # Weekly on Monday
-  workflow_dispatch:
+    - cron: '0 2 * * 0'  # Weekly on Sunday at 2 AM
 
 jobs:
-  analyze:
+  backup:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -194,97 +313,93 @@ jobs:
         with:
           go-version: '1.21'
       
-      - name: Build pentest-scheduler
-        run: go build -o pentest-scheduler
+      - name: Build downloader
+        run: go build -o git-repo-downloader
       
-      - name: Analyze repositories
+      - name: Download repositories
         run: |
-          ./pentest-scheduler -dir=. -period=6m -format=json -output=pentest-analysis.json
-          
-      - name: Upload results
-        uses: actions/upload-artifact@v3
-        with:
-          name: pentest-analysis
-          path: pentest-analysis.json
+          ./git-repo-downloader -platform=github -org=mycompany -token=${{ secrets.GITHUB_TOKEN }} -dir=./backup
+        
+      - name: Upload backup
+        # Add your backup storage logic here
 ```
 
-### Docker Usage
-
-```dockerfile
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o pentest-scheduler
-
-FROM alpine:latest
-RUN apk add --no-cache git
-WORKDIR /app
-COPY --from=builder /app/pentest-scheduler .
-ENTRYPOINT ["./pentest-scheduler"]
-```
+### Using with Cron
 
 ```bash
-# Build and run
-docker build -t pentest-scheduler .
-docker run -v /path/to/repos:/repos pentest-scheduler -dir=/repos -period=6m
+# Add to crontab for weekly backups
+0 2 * * 0 /path/to/git-repo-downloader -platform=github -org=mycompany -token=$GITHUB_TOKEN -dir=/backup/weekly
 ```
 
-## Integration with Security Tools
-
-### Integrate with JIRA
+## Building for Multiple Platforms
 
 ```bash
-# Generate JSON report and create JIRA tickets for HIGH priority repos
-./pentest-scheduler -dir=~/dev -period=6m -format=json | \
-  jq '.results[] | select(.recommended_priority == "HIGH")' | \
-  while read repo; do
-    # Create JIRA ticket logic here
-  done
+# Build for all platforms
+make build-all
+
+# Manual cross-compilation
+GOOS=linux GOARCH=amd64 go build -o git-repo-downloader-linux-amd64
+GOOS=windows GOARCH=amd64 go build -o git-repo-downloader-windows-amd64.exe
+GOOS=darwin GOARCH=amd64 go build -o git-repo-downloader-darwin-amd64
+GOOS=darwin GOARCH=arm64 go build -o git-repo-downloader-darwin-arm64
 ```
-
-### Integrate with Slack
-
-```bash
-# Send summary to Slack
-SUMMARY=$(./pentest-scheduler -dir=~/dev -period=6m 2>/dev/null | grep -A 3 "Priority Summary")
-curl -X POST -H 'Content-type: application/json' \
-  --data '{"text":"Weekly Pentest Priority Report:\n'"$SUMMARY"'"}' \
-  $SLACK_WEBHOOK_URL
-```
-
-## Best Practices
-
-1. **Regular Analysis**: Run weekly or bi-weekly for up-to-date priorities
-2. **Baseline Establishment**: Run initial analysis to establish baseline risk scores
-3. **Custom Thresholds**: Adjust `-min-change` based on your organization's risk tolerance
-4. **Historical Tracking**: Keep historical JSON outputs to track trends over time
-5. **Team Integration**: Share results with development and security teams
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Permission denied errors**: Ensure the application has read access to all repositories
-2. **Git command not found**: Ensure git is installed and in PATH
-3. **Empty results**: Check that repositories contain commits in the specified time period
-4. **High memory usage**: For large repositories, consider filtering or running on smaller subsets
+1. **"Organization not found"**
+   - Verify the organization/group name is correct
+   - Ensure your token has access to the organization
+   - For private organizations, make sure you're a member
+
+2. **"Authentication failed"**
+   - Check that your token is valid and not expired
+   - Verify the token has the required scopes
+   - For GitLab, ensure you're using the correct GitLab instance URL
+
+3. **"Git clone failed"**
+   - Ensure git is installed and in your PATH
+   - Check network connectivity
+   - For SSH cloning, ensure your SSH keys are properly configured
+
+4. **"Permission denied"**
+   - Check write permissions to the target directory
+   - Ensure the target directory exists or can be created
 
 ### Debug Mode
 
-Run with `-verbose` to see detailed processing information:
+For verbose output, you can modify the source to add debug logging or run with:
 
 ```bash
-./pentest-scheduler -dir=~/dev -period=6m -verbose
+# Enable git verbose output
+GIT_CURL_VERBOSE=1 ./git-repo-downloader -platform=github -org=myorg
 ```
+
+## Security Considerations
+
+- **Token Storage**: Never commit tokens to version control
+- **Token Scope**: Use minimal required scopes for tokens
+- **Network Security**: Be cautious when downloading from untrusted organizations
+- **Local Storage**: Ensure downloaded repositories are stored securely
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Changelog
+
+### v1.0.0
+- Initial release
+- GitHub organization support
+- GitLab group support
+- SSH and HTTPS cloning options
+- Self-hosted GitLab support
